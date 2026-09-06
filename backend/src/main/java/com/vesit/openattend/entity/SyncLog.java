@@ -20,9 +20,8 @@ public class SyncLog {
     @Column(length = 36)
     private String id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "worksheet_mapping_id")
-    private WorksheetMapping worksheetMapping;
+    @Column(name = "source_identifier", length = 255)
+    private String sourceIdentifier;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 32)

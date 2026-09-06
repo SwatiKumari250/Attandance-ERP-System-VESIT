@@ -10,7 +10,7 @@ import java.util.Optional;
 
 @Repository
 public interface SyncLogRepository extends JpaRepository<SyncLog, String> {
-    List<SyncLog> findByWorksheetMappingIdOrderByStartedAtDesc(String worksheetMappingId, Pageable pageable);
+    List<SyncLog> findBySourceIdentifierOrderByStartedAtDesc(String sourceIdentifier, Pageable pageable);
     List<SyncLog> findAllByOrderByStartedAtDesc(Pageable pageable);
-    Optional<SyncLog> findFirstByWorksheetMappingIdOrderByStartedAtDesc(String worksheetMappingId);
+    Optional<SyncLog> findFirstBySourceIdentifierOrderByStartedAtDesc(String sourceIdentifier);
 }

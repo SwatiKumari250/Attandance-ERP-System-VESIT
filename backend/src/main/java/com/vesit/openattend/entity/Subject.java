@@ -39,9 +39,6 @@ public class Subject {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @OneToOne(mappedBy = "subject", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private WorksheetMapping worksheetMapping;
-
     @OneToMany(mappedBy = "subject", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<AttendanceRecord> attendanceRecords = new ArrayList<>();

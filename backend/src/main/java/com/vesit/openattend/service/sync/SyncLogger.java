@@ -1,7 +1,6 @@
 package com.vesit.openattend.service.sync;
 
 import com.vesit.openattend.entity.SyncLog;
-import com.vesit.openattend.entity.WorksheetMapping;
 import com.vesit.openattend.entity.enums.SyncRunStatus;
 import com.vesit.openattend.repository.SyncLogRepository;
 import lombok.RequiredArgsConstructor;
@@ -21,10 +20,10 @@ public class SyncLogger {
     private final SyncLogRepository syncLogRepository;
 
     @Transactional
-    public SyncLog startRun(WorksheetMapping mapping) {
+    public SyncLog startRun(String sourceIdentifier) {
         SyncLog syncLog = SyncLog.builder()
                 .id(UUID.randomUUID().toString())
-                .worksheetMapping(mapping)
+                .sourceIdentifier(sourceIdentifier)
                 .status(SyncRunStatus.SUCCESS)
                 .rowsRead(0)
                 .rowsUpserted(0)
