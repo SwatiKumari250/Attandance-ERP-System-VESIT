@@ -20,4 +20,5 @@ public interface AttendanceRecordRepository extends JpaRepository<AttendanceReco
     List<AttendanceRecord> findByStudentId(String studentId);
     List<AttendanceRecord> findByStudentIdAndSubjectId(String studentId, String subjectId);
     List<AttendanceRecord> findBySubjectId(String subjectId);
+    List<AttendanceRecord> findByLectureSessionId(String lectureSessionId);
 }

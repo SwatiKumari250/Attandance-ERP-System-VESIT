@@ -40,6 +40,10 @@ public class AttendanceRecord {
     @JoinColumn(name = "subject_id", nullable = false)
     private Subject subject;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "lecture_session_id")
+    private LectureSession lectureSession;
+
     @Column(name = "lecture_date", nullable = false)
     private LocalDate lectureDate;
 
@@ -57,7 +61,7 @@ public class AttendanceRecord {
     @Column(columnDefinition = "TEXT")
     private String remarks;
 
-    @Column(name = "source_row_hash", nullable = false, length = 64)
+    @Column(name = "source_row_hash", length = 64)
     private String sourceRowHash;
 
     @CreationTimestamp

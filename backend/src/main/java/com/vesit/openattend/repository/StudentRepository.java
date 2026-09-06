@@ -12,4 +12,7 @@ public interface StudentRepository extends JpaRepository<Student, String> {
     Optional<Student> findByUserId(String userId);
     Optional<Student> findByUserEmail(String email);
     boolean existsByRollNo(String rollNo);
+    java.util.List<Student> findByDivisionOrderByRollNoAsc(String division);
+    java.util.List<Student> findByDivisionAndBatchOrderByRollNoAsc(String division, String batch);
+    java.util.List<Student> findAllByOrderByRollNoAsc();
 }
