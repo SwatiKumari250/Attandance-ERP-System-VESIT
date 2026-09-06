@@ -3,7 +3,11 @@ const CACHE_NAME = 'openattend-pwa-v1';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/manifest.json'
+  '/manifest.json',
+  '/assets/icon.png',
+  '/assets/logo-light.png',
+  '/assets/logo-dark.png',
+  '/assets/banner-dark.png'
 ];
 
 self.addEventListener('install', (event) => {
