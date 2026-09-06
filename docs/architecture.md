@@ -1,54 +1,76 @@
-# OpenAttend System Architecture & Database Schema
+# OpenAttend — System Architecture & Database Schema
 
-OpenAttend is an architecture-decoupled, read-only companion attendance platform tailored for educational institutions.
+OpenAttend is a high-speed, full-fledged **Native Attendance ERP System** tailored for engineering colleges (specifically VESIT) to replace cumbersome Google Forms and manual spreadsheets.
 
 ---
 
-## 🏗 System Architecture Diagram
+## 🏗️ System Architecture Diagram
 
 ```mermaid
 graph TD
-    Faculty[Faculty Google Forms] -->|Marks Attendance| GoogleSheet[Google Spreadsheet]
-    
-    subgraph OpenAttend Core Backend (Java Spring Boot 3)
-        SheetsClient[SheetsClient - Google Sheets Java SDK] -->|Polls Worksheet Values| SyncDiffer[SyncDiffer - SHA-256 Hashing]
-        SyncDiffer -->|Unchanged Hash| Skip[SKIPPED_NO_CHANGE]
-        SyncDiffer -->|New/Modified Hash| UpsertEngine[UpsertEngine - @Transactional JPA Batch]
-        UpsertEngine -->|Atomic Upsert| PostgreSQL[(PostgreSQL Database via Flyway)]
-        UpsertEngine -->|Log Run Status| SyncLogger[SyncLogger - Audit Log]
-        
-        Scheduler[Spring TaskScheduler / Cron] -->|Scheduled Polling| SheetsClient
-        PredictorCore[PredictorService Engine] -->|Calculates Safe Skips & Projections| RESTApi
-        Security[Spring Security 6 + JJWT] -->|Stateless Auth & Domain Filter| RESTApi[Spring Web MVC REST Controllers]
-        Actuator[Spring Boot Actuator] -->|Health & Prometheus Metrics| Metrics[/actuator/prometheus]
+    subgraph Onboarding Phase (Start of Semester)
+        ClassTeacher[Class Teacher] -->|Uploads Master Excel Roster| ExcelParser[Excel Parser / Apache POI]
+        ExcelParser -->|Extracts Students, Batches & Electives| PostgreSQL[(PostgreSQL Database)]
+        Admin[HOD / Admin] -->|Allocates Subjects & Batches| AllocationService[Faculty Allocation Engine]
+        AllocationService -->|Persists Teacher-Subject Mapping| PostgreSQL
     end
 
-    GoogleSheet -->|ReadOnly Scoped Access| SheetsClient
+    subgraph Daily Attendance Marking Workflow
+        Faculty[Subject Faculty / Lab Teacher] -->|Logs into Portal @ves.ac.in| FastMarkingUI[High-Speed Marking UI]
+        FastMarkingUI -->|Taps Absentees in <10s| FastMarkingAPI[Fast Attendance Submission API]
+        FastMarkingAPI -->|Natural-Key Hash & Atomic Batch| LectureSession[LectureSession & AttendanceRecords]
+        LectureSession --> PostgreSQL
+        LectureSession -->|Topic Covered Log| AcademicDiary[NAAC Academic Diary Tracker]
+    end
 
-    subgraph Client Experience Layer
-        PostgreSQL -->|Reads Only| RESTApi
-        RESTApi -->|Serves JSON API & Dashboard| WebUI[Student & Admin PWA Dashboard]
+    subgraph 48-Hour Audit & Correction Loop
+        Faculty -->|Corrects Marking within 48h| CorrectionAPI[Correction Endpoint with Mandatory Reason]
+        CorrectionAPI -->|Append Immutable Audit Event| HistoryEvents[attendance_history_events]
+        HistoryEvents --> PostgreSQL
+    end
+
+    subgraph Student Experience & Alerts
+        PostgreSQL -->|Reads Direct in <50ms| StudentAPI[REST Student API]
+        StudentAPI -->|Live Dashboards| StudentPWA[Student PWA Dashboard - Rings & Safe Skips]
+        LectureSession -->|Aggregates Drop Below 75%| DefaulterAlerts[7-Day Throttled Defaulter Alerts]
+        DefaulterAlerts -->|Email / In-App| StudentPWA
+    end
+
+    subgraph Administrative & Accreditation Reporting
+        PostgreSQL -->|Aggregated SQL Engine| DefaulterEngine[Defaulter Reporting Engine]
+        DefaulterEngine -->|1-Click Notice Board Export| A4PDF[Printable A4 Defaulter PDF & Excel]
+        PostgreSQL -->|Syllabus Metrics| DiaryReport[NAAC / NBA Course File Export]
     end
 ```
 
 ---
 
-## 🗄 Entity-Relationship (ER) Diagram
+## 🗄️ Entity-Relationship (ER) Diagram
 
 ```mermaid
 erDiagram
     USER ||--o{ REFRESH_TOKEN : owns
-    USER ||--o{ ATTENDANCE_RECORD : has
-    STUDENT ||--o{ ATTENDANCE_RECORD : tracks
-    SUBJECT ||--o{ ATTENDANCE_RECORD : contains
-    ATTENDANCE_RECORD ||--o{ ATTENDANCE_HISTORY_EVENT : logs
-    WORKSHEET_MAPPING ||--o{ SYNC_LOG : monitors
+    USER ||--o{ FACULTY_SUBJECT_ALLOCATION : assigned
+    USER ||--o{ LECTURE_SESSION : conducts
+    USER ||--o| STUDENT : profiles
+
+    STUDENT ||--o{ STUDENT_SUBJECT_ENROLLMENT : enrolled
+    STUDENT ||--o{ ATTENDANCE_RECORD : receives
+    STUDENT ||--o{ OD_LEAVE_REQUEST : submits
+    STUDENT ||--o{ NOTIFICATION : notified
+
+    SUBJECT ||--o{ FACULTY_SUBJECT_ALLOCATION : allocated
+    SUBJECT ||--o{ STUDENT_SUBJECT_ENROLLMENT : links
+    SUBJECT ||--o{ LECTURE_SESSION : hosts
+
+    LECTURE_SESSION ||--o{ ATTENDANCE_RECORD : contains
+    ATTENDANCE_RECORD ||--o{ ATTENDANCE_HISTORY_EVENT : audits
 
     USER {
         string id PK
         string email UK
         string passwordHash
-        enum role "STUDENT | ADMIN | SUPER_ADMIN"
+        enum role "STUDENT | FACULTY | CLASS_TEACHER | ADMIN | SUPER_ADMIN"
         boolean isActive
         datetime createdAt
         datetime updatedAt
@@ -70,32 +92,54 @@ erDiagram
         string code UK
         string name
         int totalPlanned
+        boolean isElective
         datetime createdAt
         datetime updatedAt
     }
 
-    WORKSHEET_MAPPING {
+    FACULTY_SUBJECT_ALLOCATION {
+        string id PK
+        string facultyId FK
+        string subjectId FK
+        string division
+        string batch "A | B | C | ALL"
+        string semester
+        datetime createdAt
+    }
+
+    STUDENT_SUBJECT_ENROLLMENT {
+        string id PK
+        string studentId FK
+        string subjectId FK
+        string division
+        string batch "A | B | C | ALL"
+        boolean isElective
+        datetime createdAt
+    }
+
+    LECTURE_SESSION {
         string id PK
         string subjectId FK
-        string sheetId
-        string worksheetName
-        string range
-        json columnRoles
-        boolean isActive
+        string facultyId FK
+        string division
+        string batch "A | B | C | ALL"
+        date lectureDate
+        int sessionIndex
+        int lectureHours
+        string topicCovered
+        enum lectureType "THEORY | LAB | TUTORIAL | REMEDIAL"
+        boolean isProxy
+        string proxyFacultyId FK
+        string sessionHash
+        datetime lockedAt
         datetime createdAt
-        datetime updatedAt
     }
 
     ATTENDANCE_RECORD {
         string id PK
+        string lectureSessionId FK
         string studentId FK
-        string subjectId FK
-        date lectureDate
-        int sessionIndex
-        enum status "PRESENT | ABSENT | NA"
-        string faculty
-        string remarks
-        string sourceRowHash
+        enum status "PRESENT | ABSENT | DUTY_PRESENT"
         datetime syncedAt
         datetime updatedAt
     }
@@ -103,10 +147,24 @@ erDiagram
     ATTENDANCE_HISTORY_EVENT {
         string id PK
         string attendanceRecordId FK
-        enum previousStatus "PRESENT | ABSENT | NA"
-        enum newStatus "PRESENT | ABSENT | NA"
+        enum previousStatus "PRESENT | ABSENT | DUTY_PRESENT"
+        enum newStatus "PRESENT | ABSENT | DUTY_PRESENT"
+        string modifiedBy
+        string reason
         datetime changedAt
-        string syncLogId FK
+    }
+
+    OD_LEAVE_REQUEST {
+        string id PK
+        string studentId FK
+        string eventName
+        date startDate
+        date endDate
+        string proofUrl
+        enum status "PENDING | APPROVED | REJECTED"
+        string reviewedBy
+        datetime reviewedAt
+        datetime createdAt
     }
 
     NOTIFICATION {
@@ -116,29 +174,30 @@ erDiagram
         string type
         string message
         boolean isRead
-        string syncLogId
         datetime createdAt
-    }
-
-    SYNC_LOG {
-        string id PK
-        string worksheetMappingId FK
-        enum status "SUCCESS | SKIPPED_NO_CHANGE | PARTIAL_FAILURE | FAILED"
-        int rowsRead
-        int rowsUpserted
-        string contentHash
-        string errorMessage
-        datetime startedAt
-        datetime finishedAt
-        int durationMs
     }
 ```
 
 ---
 
-## 🛡 Architectural Guarantees & Non-Negotiable Invariants
+## 🛡️ Architectural Guarantees & Non-Negotiable Invariants
 
-1. **Strict Read-Only Google Sheets Scopes**: No code path anywhere requests Google write permissions (`spreadsheets.readonly` only).
-2. **Zero Synchronous External Calls on User Reads**: Student and Admin dashboard reads query PostgreSQL directly; they never call Google Sheets API synchronously.
-3. **Natural Key Idempotency**: Attendance records are uniquely identified by `(studentId, subjectId, lectureDate, sessionIndex)`. Repeated sync runs produce zero duplicate rows.
-4. **Institutional Security & RBAC**: Strict validation that all authenticating accounts belong to the allowed institutional domain (`@ves.ac.in`).
+1. **High-Speed Marking UX (<10 Seconds)**:
+   - Faculty mark **only absent students**; all others default to present.
+   - Endpoint processes an entire division (up to 80 students) in `<100ms`.
+
+2. **Strict Natural-Key Idempotency**:
+   - Every attendance record is uniquely keyed by `(lecture_session_id, student_id)`.
+   - Repeated submissions, multi-taps, or network retries are deduplicated via SHA-256 session hashing.
+
+3. **48-Hour Academic Integrity Lock**:
+   - Faculty can correct marking errors within 48 hours of lecture creation.
+   - Every modification requires a mandatory explanation (`min 10 chars`) and generates an immutable audit record in `attendance_history_events`.
+   - After 48 hours, the session is permanently locked.
+
+4. **Institutional Security & RBAC Boundary**:
+   - Accounts must match the `@ves.ac.in` domain.
+   - Faculty can ONLY inspect rosters and submit attendance for classes allocated to them (`faculty_subject_allocations`). Unauthorized attempts are rejected with `403 Forbidden`.
+
+5. **NAAC / NBA Accreditation Diary Integration**:
+   - Every lecture submission records `topic_covered` and `lecture_type` directly in the database, automatically compiling real-time Course Diary syllabus progress metrics.

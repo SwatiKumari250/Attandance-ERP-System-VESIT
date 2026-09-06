@@ -241,7 +241,7 @@ mvn clean test
 - [**System Architecture & Data Flows**](docs/architecture.md)
 - [**Product Requirements Document (PRD)**](docs/PRD.md)
 - [**Frontend Design Tokens & UI Specs**](docs/UI.md)
-- [**Milestone Roadmap (M0–M9)**](docs/Milestone.md)
+- [**Milestone Roadmap (Phase 1–4)**](docs/Milestone.md)
 - [**Administrator Setup Guide**](docs/setup-guide.md)
 - [**Contributing Guidelines**](CONTRIBUTING.md)
 

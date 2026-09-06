@@ -1,227 +1,178 @@
-# OpenAttend — Milestones (Java Spring Boot)
+# OpenAttend — Milestones & Roadmap (Native Attendance ERP)
 
-> Derived from `PRD.md` and `ui.md`
-> Purpose: Sequenced build plan for autonomous agent development. Each milestone is independently testable and unlocks the next. No milestone ships UI for data that isn't real — per `ui.md` §16, no mocked data survives past the milestone that introduces its backend.
-
----
-
-## How to read this file
-
-- Each milestone lists **Scope**, **Depends on**, **Definition of Done**, and **Demo / Verification**.
-- "Definition of Done" defines the exact exit criteria that must pass before advancing to the next milestone.
-- Milestones are ordered so the **riskiest, most failure-prone part (the sync engine & data model) is proven first**, before UI is connected.
+> Derived from `PRD.md`, `architecture.md`, and GitHub Roadmap Issues (#1 through #16).  
+> Purpose: Sequenced build plan for autonomous development. Each phase is independently testable, idempotent, and production-grade.
 
 ---
 
-## M0 — Foundations & Project Scaffolding
+## 🗺️ High-Level Milestone Phases
 
-**Scope**
-- Monorepo Java Spring Boot 3 structure (`backend/pom.xml`, Java 21 LTS, Spring Data JPA, Spring Web, Flyway, PostgreSQL driver).
-- Flyway migration `V1__init_schema.sql` defining all enum types and tables (`users`, `students`, `subjects`, `worksheet_mappings`, `attendance_records`, `attendance_history_events`, `notifications`, `sync_logs`).
-- JPA Entity classes and Spring Data Repositories for all domain models.
-- Basic Health and Actuator controller (`GET /api/v1/health`, `GET /actuator/health`).
-- Docker Compose configuration for PostgreSQL local development.
-- `.env.example` and `application.yml` setup.
-
-**Depends on:** Nothing.
-
-**Definition of Done**
-- `mvn compile` and `mvn test` pass cleanly with zero errors.
-- Flyway migrations apply cleanly against PostgreSQL on application startup.
-- `GET /api/v1/health` returns `200 OK` with JSON `{ "status": "ok", "service": "OpenAttend API" }`.
-
-**Demo / Verification:** Run `mvn spring-boot:run` and verify `GET http://localhost:3000/api/v1/health`.
-
----
-
-## M1 — Sync Engine Core (Google Sheets & Idempotent Upsert)
-
-**Scope**
-- `SheetsClient`: Read-only wrapper over Google Sheets API Client for Java, supporting Base64-encoded `GOOGLE_SERVICE_ACCOUNT_JSON` and raw JSON with scoped `spreadsheets.readonly`.
-- `WorksheetMapper`: Column-role mapping engine (Date, RollNo, Status, Faculty, Remarks) with malformed-row handling.
-- `SyncDiffer`: Range-level and row-level SHA-256 content hashing for instant short-circuiting.
-- `UpsertEngine`: Atomic `@Transactional` natural-key batch upsert (`studentId, subjectId, lectureDate, sessionIndex`) with `sourceRowHash` check.
-- `SyncLogger`: Audit logger writing `SyncLog` with error classification (`429_RATE_LIMITED`, `403_FORBIDDEN`, `MALFORMED_ROWS`, `DB_ERROR`).
-- Unit & integration test suites verifying idempotency and history event generation.
-
-**Depends on:** M0.
-
-**Definition of Done**
-- Running sync twice against unchanged data produces `SKIPPED_NO_CHANGE` with **zero** duplicate rows or history events.
-- Mutating a single cell in the sheet creates exactly one `AttendanceHistoryEvent` on the subsequent sync.
-- Malformed rows log itemized skip reasons and flag the run as `PARTIAL_FAILURE` without crashing the process.
-
-**Demo / Verification:** Execute `UpsertEngineTest` proving SHA-256 short-circuiting and idempotent database transactions.
+```
+┌──────────────────────────────────────────────────────────┐
+│ Phase 1: Semester Onboarding & Contributor Setup        │
+│ (Excel Roster Upload, Faculty Allocation, Docker Dev)    │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│ Phase 2: High-Speed Attendance Marking & Correction      │
+│ (Absentees UI, Fast Submit API, 48h Audit Lock, PWA Sync)│
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│ Phase 3: Defaulter Reporting & Academic Diary            │
+│ (1-Click Defaulter Engine, A4 PDF Notice, NAAC Diary)    │
+└────────────────────────────┬─────────────────────────────┘
+                             │
+┌────────────────────────────▼─────────────────────────────┐
+│ Phase 4: Student Experience & Advanced ERP Workflows     │
+│ (Dashboard Rings, Safe Skips, OD Portal, Proxy Lectures) │
+└──────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## M2 — Predictor Core Engine
+## 🚀 Phase 1: Semester Onboarding & Contributor Setup
 
-**Scope**
-- `PredictorService`: Pure Java service implementing mathematical projection formulas per PRD §6.4:
-  - Safe Skips: $\lfloor \frac{P - (T \times \text{target})}{\text{target}} \rfloor$
-  - Must Attend: $\lceil \frac{\text{target} \times T - P}{1 - \text{target}} \rceil$
-  - Honor Threshold (85%) calculation & Unrecoverable state detection.
-- Standalone DTOs and test suite covering boundary cases (`T=0`, `P=T`, `P=0`, 100% threshold, unreachable thresholds).
+### Issue #1: Master Semester Excel Roster Upload & Student-Elective Parser
+- **Scope:**
+  - Endpoint `POST /api/v1/admin/roster/upload` accepting multipart `.xlsx` / `.csv`.
+  - Apache POI parser reading: Roll No, Name, Email (`@ves.ac.in`), Division (`D15B`), Lab Batch (`A`, `B`, `C`), and Elective Course.
+  - Upserts `users` (password defaulted to email), `students`, and `student_subject_enrollments`.
+  - Returns JSON summary: `{ "totalUploaded": 71, "newStudents": 3, "updated": 68, "errors": [] }`.
+- **Exit Criteria / DoD:**
+  - Successfully parses division spreadsheet with zero data corruption.
+  - Re-uploading the same file is 100% idempotent.
+  - Rejects non-`@ves.ac.in` emails with itemized row-level validation errors.
 
-**Depends on:** M0.
+### Issue #2: Faculty-to-Subject & Batch Allocation API with Access Control
+- **Scope:**
+  - Table `faculty_subject_allocations` (`faculty_id`, `subject_id`, `division`, `batch`, `semester`).
+  - Endpoint `POST /api/v1/admin/allocations` (Admin assigns classes to teachers).
+  - Endpoint `GET /api/v1/faculty/my-subjects` (Returns assigned classes for authenticated faculty).
+  - Security Pre-Authorization: Teachers can only view rosters and mark attendance for classes assigned to them (`403 Forbidden` on unauthorized attempts).
+- **Exit Criteria / DoD:**
+  - `GET /api/v1/faculty/my-subjects` returns strictly the logged-in teacher's classes.
+  - Integration tests verify RBAC boundary enforcement.
 
-**Definition of Done**
-- 100% unit test coverage on `PredictorServiceTest` matching reference hand-calculated attendance vectors.
-
-**Demo / Verification:** Run `mvn test -Dtest=PredictorServiceTest`.
-
----
-
-## M3 — Scheduler & Admin Sync REST APIs
-
-**Scope**
-- Spring `@Scheduled` worker periodically invoking `UpsertEngine` based on configured cron interval (`openattend.sync.cron`).
-- Admin REST Endpoints:
-  - `POST /api/v1/admin/sheet/verify` (Test Sheet connection & detect tabs)
-  - `POST /api/v1/admin/mapping` (Persist worksheet column mapping)
-  - `POST /api/v1/admin/roster/preview` (CSV import with CREATE/UPDATE/ERROR diff preview)
-  - `POST /api/v1/admin/sync/trigger` (Manual sync with cooldown rate limiting)
-  - `GET /api/v1/admin/sync/logs` (Retrieve audit history logs)
-- Spring Security RBAC guards restricting all `/api/v1/admin/**` endpoints to `ADMIN` and `SUPER_ADMIN` roles.
-
-**Depends on:** M1.
-
-**Definition of Done**
-- All admin endpoints match OpenAPI specification and return exact status codes (`429` on rapid re-trigger).
-- Role check proven: Requests with `STUDENT` token receive `403 Forbidden` on every admin endpoint.
-
-**Demo / Verification:** Execute admin integration tests verifying sheet verification, manual sync trigger, and RBAC rejection.
+### Issue #15 & #16: One-Command Docker Compose & Sample Excel Seeding
+- **Scope:**
+  - `docker-compose.yml` pre-configuring PostgreSQL 16 (`openattend_dev`).
+  - Sample seed Excel file `seeds/sample_division_D15B.xlsx` with ~70 realistic student records.
+- **Exit Criteria / DoD:**
+  - Developer can run `docker compose up -d` and launch the system cleanly.
 
 ---
 
-## M4 — Auth & Student-Facing Read APIs
+## ⚡ Phase 2: High-Speed Attendance Marking & Correction
 
-**Scope**
-- Spring Security 6 stateless JWT filter chain (`JwtAuthenticationFilter`, `JwtTokenProvider`).
-- Institutional email domain restriction (`@ves.ac.in`) with BCrypt password hashing.
-- REST Endpoints:
-  - `POST /api/v1/auth/login` (Returns JWT access token and user profile)
-  - `GET /api/v1/auth/me` (Validates token and returns active session)
-  - `POST /api/v1/auth/logout`
-  - `GET /api/v1/attendance/overall` (Overall percentage, counts, and integrated Predictor data)
-  - `GET /api/v1/attendance/subjects` (Per-subject breakdown with safe skips)
-  - `GET /api/v1/attendance/history` (Filterable roll-call history records)
-- Object-level security: Students can only retrieve data belonging to their own authenticated `studentId`.
+### Issue #3: High-Speed Attendance Marking UI ("Mark Absentees" Mode)
+- **Scope:**
+  - Selection header: Date picker, Subject & Batch dropdown (populated from `/my-subjects`), Slot.
+  - Interactive grid displaying student chips (default: **Present**).
+  - Tapping a chip toggles state to **Absent** (vibrant red badge).
+  - Live summary counter: `Total: 71 | Present: 67 | Absent: 4 (Roll: 3, 6, 8, 11)`.
+  - Optional `Topic Covered` field and sticky `Submit Attendance` button.
+- **Exit Criteria / DoD:**
+  - Submits only the list of absent roll numbers to the backend API.
+  - Fast mobile tapping response (<50ms touch lag).
 
-**Depends on:** M1, M2, M3.
+### Issue #4: Fast Attendance Submission API with Idempotency & SHA-256 Hashing
+- **Scope:**
+  - Endpoint `POST /api/v1/faculty/attendance/submit`.
+  - Atomically records `LectureSession` and marks enrolled absentees as `ABSENT` and remainder as `PRESENT`.
+  - Keyed by natural key `(subject_id, division, batch, lecture_date, session_index)`.
+  - Computes SHA-256 session hash to prevent duplicate submissions on double-clicks.
+- **Exit Criteria / DoD:**
+  - Submits in `<100ms` for a class of 80 students.
+  - Zero duplicate rows created on repeated taps.
 
-**Definition of Done**
-- Login rejects non-`@ves.ac.in` email addresses with `400 Bad Request`.
-- Student read endpoints query PostgreSQL only and complete in `<50ms` without calling external Google APIs.
-- Object-level security integration tests pass.
+### Issue #5: 48-Hour Attendance Correction Window with Mandatory Audit Reason
+- **Scope:**
+  - Endpoint `PUT /api/v1/faculty/attendance/{sessionId}/correct`.
+  - Allows subject teachers to edit marking within 48 hours.
+  - Requires non-empty reason (`@NotBlank`, min length 10 characters).
+  - Creates immutable change log in `attendance_history_events`.
+  - Automatically locks session after 48 hours (`403 Forbidden` thereafter).
+- **Exit Criteria / DoD:**
+  - Faculty blocked from editing sessions older than 48 hours.
+  - Audit event persists caller email, timestamp, and explanation.
 
-**Demo / Verification:** Authenticate via `POST /api/v1/auth/login` and query `/api/v1/attendance/overall`.
-
----
-
-## M5 — Student Dashboard UI Integration
-
-**Scope**
-- Connect existing PWA frontend (`index.html`) to live Spring Boot backend.
-- Configure Spring Web MVC static asset handler or CORS headers so `index.html` loads directly from `http://localhost:3000`.
-- Wire live data to:
-  - Hero Percentage Ring & Attendance Summary
-  - Predictor Safe Skips / Must Attend Card
-  - Subject Cards Grid & Defaulter Warning Banner
-  - Login / Logout state management and token persistence in `localStorage`.
-
-**Depends on:** M4.
-
-**Definition of Done**
-- Login as `student@ves.ac.in` displays live attendance metrics loaded from the Spring Boot API.
-- Zero mock data in active views; error states render cleanly if the backend is unreachable.
-
-**Demo / Verification:** Log in via web browser at `http://localhost:3000` and view live student dashboard metrics.
+### Issue #14: Offline Classroom Attendance Caching with Auto-Sync (PWA)
+- **Scope:**
+  - Service Worker caches shell and today's rosters in IndexedDB.
+  - If offline during submit, saves payload to `pending_submissions` and auto-submits on `window.online`.
+- **Exit Criteria / DoD:**
+  - Marking UI functions 100% offline in basement labs.
 
 ---
 
-## M6 — Analytics, History & Notifications
+## 📊 Phase 3: Defaulter Reporting & Academic Diary
 
-**Scope**
-- Backend:
-  - `GET /api/v1/attendance/analytics` (Weekly trends and subject deltas)
-  - `GET /api/v1/notifications`
-  - `PATCH /api/v1/notifications/{id}/read`
-  - `PATCH /api/v1/notifications/read-all`
-  - Automated notification triggers on threshold breach during sync runs with deduplication constraint.
-- Frontend:
-  - Connect History table with filtering and CSV export.
-  - Connect Analytics trend lines and subject comparison deltas.
-  - Connect Notification bell dropdown and unread counter.
+### Issue #6: 1-Click Defaulter List Generator (Excel/CSV Export with Date Filters)
+- **Scope:**
+  - Endpoint `GET /api/v1/reports/defaulters?division=D15B&threshold=75.0&format=json|xlsx|csv`.
+  - Fast SQL calculation aggregating conducted vs attended lectures.
+  - Exports Roll No, Name, Total Conducted, Total Attended, Overall %, and individual subject columns.
+- **Exit Criteria / DoD:**
+  - Accurate boundary math (`74.9%` is defaulter, `75.0%` is safe).
+  - Handles elective course denominations correctly.
 
-**Depends on:** M3, M5.
+### Issue #7: Official Notice-Board Ready Defaulter PDF Generator
+- **Scope:**
+  - Printable A4 PDF layout with VESIT institutional letterhead:
+    - 🔴 Critical Defaulters (`< 65%`)
+    - 🟡 Warning Zone (`65% – 74.9%`)
+    - 🟢 Safe Zone (`≥ 75%`)
+  - Formal signature blocks for Class Teacher, Attendance Coordinator, and HOD.
+- **Exit Criteria / DoD:**
+  - Formatted cleanly to fit standard A4 paper without awkward table breaks.
 
-**Definition of Done**
-- Re-running a sync generates zero duplicate notifications.
-- Threshold breach triggers a notification when a student drops below 75%.
-- History CSV export downloads accurate filtered records.
-
-**Demo / Verification:** Trigger a sync that reduces attendance below 75% and inspect the real-time notification in the UI.
-
----
-
-## M7 — Admin Panel UI Integration
-
-**Scope**
-- Connect Admin screens in `index.html` to live Spring Boot backend:
-  - Sheet Connection & Tab Detection
-  - Worksheet Column Mapping Interface
-  - Roster CSV Upload & Diff Preview
-  - Manual Sync Trigger with Cooldown Timer
-  - Sync Audit Logs Viewer with expandable error details.
-
-**Depends on:** M3, M5.
-
-**Definition of Done**
-- Admin interface executes cold-start flow end-to-end against live backend endpoints.
-- Role switcher allows Admin users to toggle between Student Dashboard and Admin Portal.
-
-**Demo / Verification:** Perform complete admin setup walkthrough (Connect Sheet ➔ Map Columns ➔ Sync ➔ View Logs).
+### Issue #8: NAAC / NBA Academic Course Diary & Lecture Log ("Topics Covered" Tracker)
+- **Scope:**
+  - Extends lecture sessions to store `topic_covered`, `lecture_type` (`THEORY`, `LAB`, `TUTORIAL`), and headcounts.
+  - Endpoint `GET /api/v1/faculty/diary?subjectId=...` returning chronological syllabus metrics.
+- **Exit Criteria / DoD:**
+  - Course diary syllabus metrics exported cleanly for NAAC Course Files.
 
 ---
 
-## M8 — Production Hardening, Actuator & Packaging
+## 🎓 Phase 4: Student Experience & Advanced ERP Workflows
 
-**Scope**
-- Spring Boot Actuator: `/actuator/health`, `/actuator/info`, `/actuator/prometheus` metrics.
-- Security Headers (Content Security Policy, X-Content-Type-Options, Strict-Transport-Security).
-- Multi-stage `Dockerfile` creating an optimized container image.
-- Comprehensive end-to-end integration test sweep across all endpoints and RBAC roles.
-- Cleanup of legacy Node.js backend files (`api/`, `apps/api/`, `packages/`, `dev-server.js`).
+### Issue #9: Mobile-First Student Dashboard with Percentage Rings & Status Badges
+- **Scope:**
+  - Animated SVG circular percentage ring (Green $\ge 75\%$, Yellow $65\% - 74.9\%$, Red $< 65\%$).
+  - Subject breakdown cards with Safe / Defaulter badges.
+  - Date-by-date lecture history modal.
+- **Exit Criteria / DoD:**
+  - Instant load (<100ms) with zero layout shift on mobile screens.
 
-**Depends on:** M6, M7.
+### Issue #10: Safe Skips & Attendance Recovery Target Calculator
+- **Scope:**
+  - Safe Skips: $S = \lfloor \frac{4A - 3T}{3} \rfloor$
+  - Must-Attend: $R = \lceil 3T - 4A \rceil$
+  - Standalone service with 100% boundary test coverage.
 
-**Definition of Done**
-- All automated unit and integration tests pass (`mvn test`).
-- Actuator endpoints provide live health and Prometheus metrics.
-- Docker image builds and runs successfully.
+### Issue #11: Automated 75% Attendance Defaulter Warning Notifications
+- **Scope:**
+  - Detects drop below 75% upon lecture submission.
+  - Sends email to student's `@ves.ac.in` with 7-day cooldown throttling.
 
-**Demo / Verification:** Run `mvn clean package` and launch the containerized application.
+### Issue #12: Paperless Official Duty (OD) & Medical Leave Approval Portal
+- **Scope:**
+  - Student applies with event name, dates, and proof upload.
+  - Teacher/Coordinator approves with 1-click.
+  - Approved leaves automatically recalculate attendance as `DUTY_PRESENT`.
+
+### Issue #13: Proxy / Substitute Lecture Delegation with Audit Trail
+- **Scope:**
+  - `POST /api/v1/faculty/proxy/assign` allows delegating a lecture slot to a colleague with audit tracking (`is_proxy = true`).
 
 ---
 
-## M9 — Open-Source Documentation & Launch
+## 🛡️ Non-Negotiable Invariants
 
-**Scope**
-- Comprehensive `README.md`, `CONTRIBUTING.md`, `docs/setup-guide.md`, and OpenAPI JSON specification.
-- Clean repository structure ready for public contributions.
-
-**Depends on:** M8.
-
-**Definition of Done**
-- Fresh clone can be launched following `docs/setup-guide.md` with zero undocumented steps.
-
----
-
-## Invariants That Must Never Regress
-
-- **Strict Read-Only Boundary**: No Google write scopes requested anywhere.
-- **Zero Synchronous External Calls**: Student read endpoints query PostgreSQL only.
-- **Idempotency**: Repeated sync runs never duplicate records or history events.
-- **Institutional Email Validation**: Non-`@ves.ac.in` accounts cannot authenticate.
+1. **High-Speed Marking UX**: Entire division marked in <10 seconds by tapping only absentees.
+2. **Strict Idempotency**: Natural key + SHA-256 session hash prevents duplicate writes.
+3. **48-Hour Audit Lock**: Edits within 48 hours require 10+ char justification; locked thereafter.
+4. **Institutional Email Validation**: Non-`@ves.ac.in` accounts cannot authenticate.
+5. **No Google Sheets Dependency**: Attendance is created and stored natively in PostgreSQL.
