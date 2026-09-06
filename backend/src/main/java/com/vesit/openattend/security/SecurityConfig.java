@@ -35,12 +35,15 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/",
                                 "/index.html",
+                                "/assets/**",
+                                "/favicon.ico",
                                 "/sw.js",
                                 "/manifest.json",
                                 "/api/v1/auth/**",
                                 "/api/v1/health/**",
                                 "/actuator/**"
                         ).permitAll()
+                        .requestMatchers("/api/v1/faculty/**").hasAnyRole("FACULTY", "CLASS_TEACHER", "ADMIN", "SUPER_ADMIN")
                         .requestMatchers("/api/v1/admin/**").hasAnyRole("ADMIN", "SUPER_ADMIN")
                         .anyRequest().permitAll() // Allow student endpoints to resolve user from Bearer token
                 )

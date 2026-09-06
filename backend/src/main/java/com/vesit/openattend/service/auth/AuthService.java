@@ -54,7 +54,8 @@ public class AuthService {
         }
 
         Optional<User> userOpt = userRepository.findByEmail(email);
-        if (userOpt.isEmpty() && (email.equals("student@ves.ac.in") || email.equals("admin@ves.ac.in"))) {
+        if (userOpt.isEmpty() && (email.equals("student@ves.ac.in") || email.equals("admin@ves.ac.in")
+                || email.equals("faculty@ves.ac.in") || email.equals("classteacher@ves.ac.in"))) {
             ensureSeedAccounts();
             userOpt = userRepository.findByEmail(email);
         }
@@ -76,8 +77,24 @@ public class AuthService {
         }
 
         Student student = studentRepository.findByUserId(user.getId()).orElse(null);
-        String rollNo = student != null ? student.getRollNo() : (user.getRole() == Role.ADMIN ? "ADM-01" : "2024CS01");
-        String name = student != null ? student.getName() : (user.getRole() == Role.ADMIN ? "Prof. Admin User" : "Vedant Gharat");
+        String rollNo;
+        String name;
+        if (student != null) {
+            rollNo = student.getRollNo();
+            name = student.getName();
+        } else if (user.getRole() == Role.ADMIN || user.getRole() == Role.SUPER_ADMIN) {
+            rollNo = "ADM-01";
+            name = "Prof. Admin User";
+        } else if (user.getRole() == Role.CLASS_TEACHER) {
+            rollNo = "CT-01";
+            name = "Prof. Sneha Sharma (Class Teacher)";
+        } else if (user.getRole() == Role.FACULTY) {
+            rollNo = "FAC-01";
+            name = "Prof. Amit Rao (Faculty)";
+        } else {
+            rollNo = "USR-01";
+            name = "VESIT User";
+        }
         String division = student != null ? student.getDivision() : "D12B";
         String batch = student != null ? student.getBatch() : "B1";
 
@@ -161,6 +178,26 @@ public class AuthService {
                     .email("admin@ves.ac.in")
                     .passwordHash(passwordEncoder.encode("admin123"))
                     .role(Role.ADMIN)
+                    .isActive(true)
+                    .build());
+        }
+
+        if (!userRepository.existsByEmail("faculty@ves.ac.in")) {
+            userRepository.save(User.builder()
+                    .id("usr_fac_01")
+                    .email("faculty@ves.ac.in")
+                    .passwordHash(passwordEncoder.encode("faculty@ves.ac.in"))
+                    .role(Role.FACULTY)
+                    .isActive(true)
+                    .build());
+        }
+
+        if (!userRepository.existsByEmail("classteacher@ves.ac.in")) {
+            userRepository.save(User.builder()
+                    .id("usr_ct_01")
+                    .email("classteacher@ves.ac.in")
+                    .passwordHash(passwordEncoder.encode("classteacher@ves.ac.in"))
+                    .role(Role.CLASS_TEACHER)
                     .isActive(true)
                     .build());
         }
