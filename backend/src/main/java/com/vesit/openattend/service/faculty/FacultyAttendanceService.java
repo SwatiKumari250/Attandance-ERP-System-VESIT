@@ -202,6 +202,8 @@ public class FacultyAttendanceService {
                     .attendanceRecord(record)
                     .previousStatus(null)
                     .newStatus(status)
+                    .modifiedBy(facultyEmail)
+                    .mandatoryReason("Initial attendance submission")
                     .build();
             attendanceHistoryEventRepository.save(event);
         }
